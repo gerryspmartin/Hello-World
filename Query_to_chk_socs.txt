@@ -1,0 +1,76 @@
+-- Scan lindte and linsoc for all sochs that are in an ACTIVE state and the number of instances of each  from linsoc.
+select 
+fsoc, fclstat, sum(NoInst) nolines
+from 
+(
+select
+--Srv_service_code,
+mir.fsoc, mir.fclstat, Mir.NoInst, 
+----------- socsoc
+
+case when s1.fsoc is null then 'No' else 'Yes' end  as ChkSocsoc,
+---------- rtm
+
+rtm.fsoc rtm_soc, rtm.group_type, rtm.category_level_01,
+case when rtm.fsoc is null then 'No' else 'Yes' end  as ChkchkRTM,
+
+--------- ftr
+fr.fsoc ftr_soc, fr.ftr_feature_id, fr.ftr_service_type_cd,
+case when fr.fsoc is null then 'No' else 'Yes' end  as ChkchkFtr
+
+from (
+	select 
+	Srv_service_code, sub1.fsoc, sub1.fclstat, count(1) as NoInst
+		from (select
+		trim(ls.fstd)||trim(ls.ftelno) as Srv_service_code,
+		trim(ls.fsoc) fsoc, ls.fprovdte,  ld.fclstat, ld.faccno
+		from edw_prd_stg.mir_tis_linsoc ls
+		join (
+			select 
+			trim(fstd)||trim( ftelno) as srv_service_code, fprovdte, fclstat, faccno,
+			rank() over (PARTITION BY fstd, ftelno ORDER BY fprovdte DESC )  as rowrank
+			from edw_prd_stg.mir_tis_lindte
+			where fclstat <> 'C') ld
+			on (trim(ls.fstd)||trim(ls.ftelno) = ld.srv_service_code)) sub1
+	where (trim(fsoc) like 'DW%' or trim(fsoc) like 'DB%' or trim(fsoc) like 'WLR%')
+	group by 1, 2,3	) mir
+	
+	
+			-- Now join this to the socsoc table to ensire all the socks that are in linsoc/lindte are in socsoc
+			left outer join  (select distinct  trim(fsoc) fsoc from edw_prd_stg.stg_tis_socsoc ) s1 on (mir.fsoc = s1.fsoc) 
+			
+			-- Now join to the Reference table to see if the soc is there
+			left outer join (select distinct trim(soc) fsoc, group_type, category_level_01 			from edw_prd_stg.stg_rtm_service_order_code) rtm
+			on (mir.fsoc = rtm.fsoc) 
+
+			-- Now join to the ftr_Feature table to see if the soc is there
+			left outer join (select trim(ftr_feature_code_orig)  as fsoc, ftr_feature_id, ftr_service_type_cd from edw_prd_cmn.ftr_feature 	where ftr_source_cd = 'TIS') fr
+			on (mir.fsoc = fr.fsoc)  )s2
+			
+where (
+ChkSocsoc = 'No' or  ChkchkRTM = 'No' or ChkchkFtr = 'No')
+group by 1, 2
+
+order by 1, 2
+/*
+
+select  
+s1.srv_service_id , count(1) as NoFtr,
+sum( case when s1.ftr_feature_id = s2.ftr_feature_id then 1 else 0 end) as hasPriSoc
+from (
+select 
+s.srv_service_id ,
+xrf.ftr_feature_id
+from edw_prd_rtl_bv.fac_srv_ftr_xrf xrf
+join edw_prd_rtl_bv.srv_service s
+on (xrf.srv_service_id = s.srv_service_id)
+where s.srv_source_cd = 'TIS'
+and xrf.srv_ftr_end_dt > date) s1
+left outer join (
+
+
+) s2
+on (s1.ftr_feature_id = s2.ftr_feature_id)
+group by 1
+*/
+
